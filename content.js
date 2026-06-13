@@ -69,8 +69,7 @@
   let adObserver = null;
   let userPlaybackRate = 1.0;
   let userMuteState = false;
-  let adCounted = false;
-  let lastAdSrc = '';
+  let adSessionActive = false; // true while .ad-showing/.ad-interrupting is present
 
   // ─── Style Management ───────────────────────────────────────────────
   function injectStyles() {
@@ -166,13 +165,9 @@
     // Perform immediate skip
     skipVideo(video);
 
-    // Count the ad
-    if (video.src !== lastAdSrc) {
-      lastAdSrc = video.src;
-      adCounted = false;
-    }
-    if (!adCounted) {
-      adCounted = true;
+    // Count the ad once per session (session = one appearance of .ad-showing/.ad-interrupting)
+    if (!adSessionActive) {
+      adSessionActive = true;
       chrome.storage.local.get({ adsSkipped: 0 }, (data) => {
         chrome.storage.local.set({ adsSkipped: data.adsSkipped + 1 });
       });
@@ -192,13 +187,12 @@
 
   function restoreAfterAd() {
     document.documentElement.classList.remove('yt-ad-active');
+    adSessionActive = false; // reset so next ad gets counted
     const video = document.querySelector('video');
     if (video) {
       video.playbackRate = userPlaybackRate;
       video.muted = userMuteState;
     }
-    adCounted = false;
-    lastAdSrc = '';
   }
 
   // ─── Check if ad is active ─────────────────────────────────────────
