@@ -165,13 +165,8 @@
     // Perform immediate skip
     skipVideo(video);
 
-    // Count the ad once per session (session = one appearance of .ad-showing/.ad-interrupting)
-    if (!adSessionActive) {
-      adSessionActive = true;
-      chrome.storage.local.get({ adsSkipped: 0 }, (data) => {
-        chrome.storage.local.set({ adsSkipped: data.adsSkipped + 1 });
-      });
-    }
+    // adSessionActive prevents restoreAfterAd being called before the ad finishes
+    adSessionActive = true;
   }
 
   function skipVideo(video) {
@@ -271,6 +266,19 @@
       extensionEnabled = changes.enabled.newValue;
       updateExtensionState();
     }
+  });
+
+  // ─── Bridge: receive ad-blocked signals from inject.js (MAIN world) ──
+  // inject.js runs in the page's MAIN world and cannot access chrome.storage.
+  // It fires a postMessage; we catch it here and update the counter.
+  window.addEventListener('message', (event) => {
+    if (event.source !== window) return;
+    if (!event.data || event.data.type !== 'YT_AD_SHIELD_BLOCKED') return;
+    if (!extensionEnabled) return;
+
+    chrome.storage.local.get({ adsSkipped: 0 }, (data) => {
+      chrome.storage.local.set({ adsSkipped: data.adsSkipped + 1 });
+    });
   });
 
   // Inject styles as early as possible

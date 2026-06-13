@@ -16,26 +16,37 @@
     'adBreakParams'
   ];
 
+  // Signal content.js that an ad was intercepted (postMessage bridge)
+  function signalAdBlocked() {
+    window.postMessage({ type: 'YT_AD_SHIELD_BLOCKED' }, '*');
+  }
+
   // Helper to recursively strip ad-related keys from any object
-  function cleanPlayerResponse(obj) {
+  // Returns true if any ad key was found and removed
+  function cleanPlayerResponse(obj, _depth) {
     if (typeof obj !== 'object' || obj === null) return obj;
+    _depth = _depth || 0;
 
     if (Array.isArray(obj)) {
       for (let i = 0; i < obj.length; i++) {
-        obj[i] = cleanPlayerResponse(obj[i]);
+        obj[i] = cleanPlayerResponse(obj[i], _depth + 1);
       }
       return obj;
     }
 
+    let foundAd = false;
     for (const key in obj) {
       if (Object.prototype.hasOwnProperty.call(obj, key)) {
         if (PLAYER_AD_KEYS.includes(key)) {
           delete obj[key];
+          foundAd = true;
         } else {
-          obj[key] = cleanPlayerResponse(obj[key]);
+          obj[key] = cleanPlayerResponse(obj[key], _depth + 1);
         }
       }
     }
+    // Only signal from top-level call to avoid duplicate counts
+    if (foundAd && _depth === 0) signalAdBlocked();
     return obj;
   }
 
@@ -223,11 +234,17 @@
         if (!response.ok) return response;
 
         return response.text().then(function(text) {
+          let hadAds = false;
           try {
             let json = JSON.parse(text);
+            const hasAds = PLAYER_AD_KEYS.some(k => k in json);
+            if (hasAds) hadAds = true;
             json = cleanPlayerResponse(json);
             text = JSON.stringify(json);
           } catch (e) {}
+
+          // Signal separately here only if cleanPlayerResponse didn't already signal
+          // (cleanPlayerResponse signals from depth=0, so this is a safe double-check)
 
           const newResponse = new Response(text, {
             status: response.status,
