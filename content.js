@@ -27,10 +27,7 @@
     #player-ads,
     #masthead-ad,
     ytd-banner-promo-renderer,
-    .ytp-ad-image-overlay,
-    .ytp-ad-message-container,
-    .ytp-ad-player-overlay,
-    .ytp-ad-text-overlay {
+    .ytp-ad-image-overlay {
       display: none !important;
       height: 0 !important;
       width: 0 !important;
@@ -49,18 +46,6 @@
       visibility: hidden !important;
       height: 0 !important;
       pointer-events: none !important;
-    }
-    html.yt-ad-active .ytp-ad-player-overlay,
-    html.yt-ad-active .ytp-ad-player-overlay-layout,
-    html.yt-ad-active .ytp-ad-action-interstitial,
-    html.yt-ad-active .ytp-ad-image-overlay,
-    html.yt-ad-active .ytp-ad-message-container,
-    html.yt-ad-active .ytp-ad-overlay-container,
-    .ad-showing .ytp-ad-player-overlay-layout,
-    .ad-interrupting .ytp-ad-player-overlay-layout,
-    .ad-showing .ytp-ad-action-interstitial,
-    .ad-interrupting .ytp-ad-action-interstitial {
-      display: none !important;
     }
   `;
 
@@ -210,10 +195,24 @@
 
   // ─── Check if ad is active ─────────────────────────────────────────
   function isAdActive() {
-    // Only trust the player container classes that YouTube reliably adds/removes.
-    // Do NOT check for buttons or overlays, as YouTube often leaves them hidden in the DOM.
-    return document.querySelector('.ad-showing') !== null ||
-           document.querySelector('.ad-interrupting') !== null;
+    // 1. Check classes (fastest, if YouTube still uses them)
+    if (document.querySelector('.ad-showing') !== null || document.querySelector('.ad-interrupting') !== null) {
+      return true;
+    }
+    
+    // 2. Check for visible video ad UI
+    const playerOverlay = document.querySelector('.ytp-ad-player-overlay');
+    if (playerOverlay && playerOverlay.offsetParent !== null) {
+      return true;
+    }
+
+    // 3. Check for modern skip buttons being visible
+    const skipModern = document.querySelector('.ytp-ad-skip-button-modern');
+    if (skipModern && skipModern.offsetParent !== null) {
+      return true;
+    }
+
+    return false;
   }
 
   // ─── MutationObserver & Interval ───────────────────────────────────
