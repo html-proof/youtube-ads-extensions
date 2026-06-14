@@ -123,7 +123,7 @@
 
   // ─── Core Ad Handler ───────────────────────────────────────────────
   function handleAd() {
-    const video = document.querySelector('video');
+    const video = getActiveVideo();
     if (!video) return;
 
     // We caught an ad! Increment counter if off cooldown.
@@ -193,6 +193,20 @@
     }
   }
 
+  // ─── Video Selection ────────────────────────────────────────────────
+  function getActiveVideo() {
+    const videos = document.querySelectorAll('video');
+    if (videos.length === 1) return videos[0];
+    
+    // Find the one that is currently playing
+    for (let i = 0; i < videos.length; i++) {
+      if (videos[i].readyState > 0 && !videos[i].paused && !videos[i].ended) {
+        return videos[i];
+      }
+    }
+    return videos[0]; // fallback
+  }
+
   // ─── Check if ad is active ─────────────────────────────────────────
   function isAdActive() {
     // 1. Check classes (fastest, if YouTube still uses them)
@@ -206,10 +220,12 @@
       return true;
     }
 
-    // 3. Check for modern skip buttons being visible
-    const skipModern = document.querySelector('.ytp-ad-skip-button-modern');
-    if (skipModern && skipModern.offsetParent !== null) {
-      return true;
+    // 3. Check ALL known skip buttons
+    for (const sel of SKIP_SELECTORS) {
+      const btn = document.querySelector(sel);
+      if (btn && btn.offsetParent !== null) {
+        return true;
+      }
     }
 
     return false;
