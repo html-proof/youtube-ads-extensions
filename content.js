@@ -70,6 +70,19 @@
   let userPlaybackRate = 1.0;
   let userMuteState = false;
   let adSessionActive = false; // true while .ad-showing/.ad-interrupting is present
+  let lastAdCountTime = 0; // Prevent double counting
+
+  // ─── Counter Logic ──────────────────────────────────────────────────
+  function incrementAdCount() {
+    const now = Date.now();
+    // 2-second cooldown to prevent double counting if both inject.js and content.js catch the same ad
+    if (now - lastAdCountTime < 2000) return; 
+    lastAdCountTime = now;
+
+    chrome.storage.local.get({ adsSkipped: 0 }, (data) => {
+      chrome.storage.local.set({ adsSkipped: data.adsSkipped + 1 });
+    });
+  }
 
   // ─── Style Management ───────────────────────────────────────────────
   function injectStyles() {
@@ -127,6 +140,9 @@
   function handleAd() {
     const video = document.querySelector('video');
     if (!video) return;
+
+    // We caught an ad! Increment counter if off cooldown.
+    incrementAdCount();
 
     // Add CSS class to hide ad elements instantly
     document.documentElement.classList.add('yt-ad-active');
@@ -281,9 +297,7 @@
     if (!event.data || event.data.type !== 'YT_AD_SHIELD_BLOCKED') return;
     if (!extensionEnabled) return;
 
-    chrome.storage.local.get({ adsSkipped: 0 }, (data) => {
-      chrome.storage.local.set({ adsSkipped: data.adsSkipped + 1 });
-    });
+    incrementAdCount();
   });
 
   // Inject styles as early as possible
