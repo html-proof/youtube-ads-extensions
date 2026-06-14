@@ -131,56 +131,47 @@
     // Add CSS class to hide ad elements instantly
     document.documentElement.classList.add('yt-ad-active');
 
-    // Check if this is a video ad (interrupting the main video)
-    const isVideoAd = document.querySelector('.ad-showing') !== null || 
-                      document.querySelector('.ad-interrupting') !== null ||
-                      document.querySelector('.ytp-ad-player-overlay') !== null ||
-                      document.querySelector('.ytp-ad-skip-button') !== null ||
-                      document.querySelector('.ytp-ad-skip-button-modern') !== null;
-
-    if (isVideoAd) {
-      // Bind event listeners to track user's volume/rate and skip when ready
-      if (!video.__adEventsBound) {
-        video.__adEventsBound = true;
-        
-        // Save current states as defaults
-        userPlaybackRate = (video.playbackRate === 16) ? 1.0 : video.playbackRate;
-        userMuteState = video.muted;
-
-        video.addEventListener('ratechange', () => {
-          if (!isAdActive() && video.playbackRate !== 16) {
-            userPlaybackRate = video.playbackRate;
-          }
-        });
-        video.addEventListener('volumechange', () => {
-          if (!isAdActive()) {
-            userMuteState = video.muted;
-          }
-        });
-
-        const skipEvents = ['loadedmetadata', 'durationchange', 'play', 'playing', 'timeupdate'];
-        skipEvents.forEach(evt => {
-          video.addEventListener(evt, () => {
-            if (isAdActive()) {
-              skipVideo(video);
-            }
-          });
-        });
-      }
-
-      // Mute instantly
-      video.muted = true;
-      // Speed up instantly
-      video.playbackRate = 16;
+    // Bind event listeners to track user's volume/rate and skip when ready
+    if (!video.__adEventsBound) {
+      video.__adEventsBound = true;
       
-      // Perform immediate skip on the video timeline
-      if (video.duration && !isNaN(video.duration)) {
-        if (video.currentTime < video.duration - 0.1) {
-          video.currentTime = video.duration;
+      // Save current states as defaults
+      userPlaybackRate = (video.playbackRate === 16) ? 1.0 : video.playbackRate;
+      userMuteState = video.muted;
+
+      video.addEventListener('ratechange', () => {
+        if (!isAdActive() && video.playbackRate !== 16) {
+          userPlaybackRate = video.playbackRate;
         }
-      } else {
-        video.currentTime = 9999;
+      });
+      video.addEventListener('volumechange', () => {
+        if (!isAdActive()) {
+          userMuteState = video.muted;
+        }
+      });
+
+      const skipEvents = ['loadedmetadata', 'durationchange', 'play', 'playing', 'timeupdate'];
+      skipEvents.forEach(evt => {
+        video.addEventListener(evt, () => {
+          if (isAdActive()) {
+            skipVideo(video);
+          }
+        });
+      });
+    }
+
+    // Mute instantly
+    video.muted = true;
+    // Speed up instantly
+    video.playbackRate = 16;
+    
+    // Perform immediate skip on the video timeline
+    if (video.duration && !isNaN(video.duration)) {
+      if (video.currentTime < video.duration - 0.1) {
+        video.currentTime = video.duration;
       }
+    } else {
+      video.currentTime = 9999;
     }
 
     // Always attempt to click skip buttons if they exist
@@ -213,13 +204,10 @@
 
   // ─── Check if ad is active ─────────────────────────────────────────
   function isAdActive() {
-    return document.documentElement.classList.contains('yt-ad-active') ||
-           document.querySelector('.ad-showing') !== null ||
-           document.querySelector('.ad-interrupting') !== null ||
-           document.querySelector('.ytp-ad-player-overlay') !== null ||
-           document.querySelector('.ytp-ad-message-container') !== null ||
-           document.querySelector('.ytp-ad-skip-button') !== null ||
-           document.querySelector('.ytp-ad-skip-button-modern') !== null;
+    // Only trust the player container classes that YouTube reliably adds/removes.
+    // Do NOT check for buttons or overlays, as YouTube often leaves them hidden in the DOM.
+    return document.querySelector('.ad-showing') !== null ||
+           document.querySelector('.ad-interrupting') !== null;
   }
 
   // ─── MutationObserver & Interval ───────────────────────────────────
