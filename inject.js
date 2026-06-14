@@ -23,13 +23,17 @@
 
   // Helper to recursively strip ad-related keys from any object
   // Returns true if any ad key was found and removed
-  function cleanPlayerResponse(obj, _depth) {
+  function cleanPlayerResponse(obj, _depth, _visited) {
     if (typeof obj !== 'object' || obj === null) return obj;
     _depth = _depth || 0;
+    _visited = _visited || new WeakSet();
+
+    if (_visited.has(obj)) return obj;
+    _visited.add(obj);
 
     if (Array.isArray(obj)) {
       for (let i = 0; i < obj.length; i++) {
-        obj[i] = cleanPlayerResponse(obj[i], _depth + 1);
+        obj[i] = cleanPlayerResponse(obj[i], _depth + 1, _visited);
       }
       return obj;
     }
@@ -41,7 +45,7 @@
           delete obj[key];
           foundAd = true;
         } else {
-          obj[key] = cleanPlayerResponse(obj[key], _depth + 1);
+          obj[key] = cleanPlayerResponse(obj[key], _depth + 1, _visited);
         }
       }
     }

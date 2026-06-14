@@ -201,38 +201,34 @@
            document.querySelector('.ytp-ad-skip-button-modern') !== null;
   }
 
-  // ─── MutationObserver: fires the INSTANT the DOM changes ───────────
+  // ─── MutationObserver & Interval ───────────────────────────────────
   function startObserver() {
     if (adObserver) return;
 
-    // This observer watches the entire page for any DOM changes
+    // Only observe DOM insertions (much cheaper than watching all classes globally)
     adObserver = new MutationObserver(() => {
       if (!extensionEnabled) return;
-
       if (isAdActive()) {
-        // Ad detected! Handle it immediately — this fires within 1ms of the ad appearing
         handleAd();
-      } else {
-        // No ad — restore normal state if we were in ad mode
-        if (document.documentElement.classList.contains('yt-ad-active')) {
-          restoreAfterAd();
-        }
+      } else if (document.documentElement.classList.contains('yt-ad-active')) {
+        restoreAfterAd();
       }
     });
 
-    // Watch for class changes on the player and any new elements being added
     adObserver.observe(document.documentElement, {
       childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['class']
+      subtree: true
     });
 
-    // Also run a slow backup check every 500ms in case MutationObserver misses something
+    // Fast backup interval (50ms) checks for class changes (cheaper than global attribute observer)
     setInterval(() => {
       if (!extensionEnabled) return;
-      if (isAdActive()) handleAd();
-    }, 500);
+      if (isAdActive()) {
+        handleAd();
+      } else if (document.documentElement.classList.contains('yt-ad-active')) {
+        restoreAfterAd();
+      }
+    }, 50);
   }
 
   function stopObserver() {
