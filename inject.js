@@ -227,13 +227,13 @@
     configurable: true
   });
 
-  // ─── Intercept fetch — ONLY /youtubei/v1/player ───
+  // ─── Intercept fetch — /youtubei/v1/player & /youtubei/v1/next ───
   const originalFetch = window.fetch;
   window.fetch = function(...args) {
     const request = args[0];
     const requestUrl = typeof request === 'string' ? request : (request instanceof Request ? request.url : '');
 
-    if (requestUrl.includes('/youtubei/v1/player')) {
+    if (requestUrl.includes('/youtubei/v1/player') || requestUrl.includes('/youtubei/v1/next')) {
       return originalFetch.apply(window, args).then(function(response) {
         if (!response.ok) return response;
 
@@ -241,14 +241,11 @@
           let hadAds = false;
           try {
             let json = JSON.parse(text);
-            const hasAds = PLAYER_AD_KEYS.some(k => k in json);
+            const hasAds = PLAYER_AD_KEYS.some(k => JSON.stringify(json).includes(k)); // Broad check
             if (hasAds) hadAds = true;
             json = cleanPlayerResponse(json);
             text = JSON.stringify(json);
           } catch (e) {}
-
-          // Signal separately here only if cleanPlayerResponse didn't already signal
-          // (cleanPlayerResponse signals from depth=0, so this is a safe double-check)
 
           const newResponse = new Response(text, {
             status: response.status,
@@ -264,5 +261,53 @@
     return originalFetch.apply(this, args);
   };
 
-  console.log('[YT-AdShield] API interceptor v3.1 initialized (deep clean).');
+  // ─── Intercept XMLHttpRequest (Fallback) ───
+  try {
+    const originalXHROpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(method, url) {
+      this._url = url;
+      return originalXHROpen.apply(this, arguments);
+    };
+
+    const descResponseText = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'responseText');
+    if (descResponseText) {
+      Object.defineProperty(XMLHttpRequest.prototype, 'responseText', {
+        get: function() {
+          let text = descResponseText.get.call(this);
+          if (this._url && (this._url.includes('/youtubei/v1/player') || this._url.includes('/youtubei/v1/next'))) {
+            try {
+              let json = JSON.parse(text);
+              json = cleanPlayerResponse(json);
+              text = JSON.stringify(json);
+            } catch (e) {}
+          }
+          return text;
+        },
+        configurable: true
+      });
+    }
+
+    const descResponse = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'response');
+    if (descResponse) {
+      Object.defineProperty(XMLHttpRequest.prototype, 'response', {
+        get: function() {
+          let res = descResponse.get.call(this);
+          if (this._url && (this._url.includes('/youtubei/v1/player') || this._url.includes('/youtubei/v1/next'))) {
+            try {
+              if (typeof res === 'string') {
+                let json = JSON.parse(res);
+                res = JSON.stringify(cleanPlayerResponse(json));
+              } else if (typeof res === 'object' && res !== null) {
+                res = cleanPlayerResponse(res);
+              }
+            } catch (e) {}
+          }
+          return res;
+        },
+        configurable: true
+      });
+    }
+  } catch (e) {}
+
+  console.log('[YT-AdShield] API interceptor v3.2 initialized (Network Level).');
 })();
