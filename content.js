@@ -182,16 +182,7 @@
     video.playbackRate = 16;
     
     // Perform immediate skip on the video timeline
-    if (video.duration && !isNaN(video.duration)) {
-      if (video.currentTime < video.duration - 0.1) {
-        video.currentTime = video.duration;
-      }
-    } else {
-      video.currentTime = 9999;
-    }
-
-    // Always attempt to click skip buttons if they exist
-    clickSkipButton();
+    skipVideo(video);
 
     // adSessionActive prevents restoreAfterAd being called before the ad finishes
     adSessionActive = true;
@@ -199,11 +190,10 @@
 
   function skipVideo(video) {
     if (video.duration && !isNaN(video.duration)) {
-      if (video.currentTime < video.duration - 0.1) {
-        video.currentTime = video.duration;
+      // Skip to 0.1s before the end. Skipping exactly to the end causes YouTube's player to hang.
+      if (video.currentTime < video.duration - 0.5) {
+        video.currentTime = video.duration - 0.1;
       }
-    } else {
-      video.currentTime = 9999;
     }
     clickSkipButton();
   }
