@@ -105,19 +105,22 @@
   ];
 
   function clickSkipButton() {
+    let clicked = false;
     for (const sel of SKIP_SELECTORS) {
-      const btn = document.querySelector(sel);
-      if (btn && btn.offsetParent !== null) {
-        try { btn.click(); } catch (e) {}
-        try {
-          ['mousedown', 'mouseup', 'click'].forEach(type => {
-            btn.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
-          });
-        } catch (e) {}
-        return true;
+      const btns = document.querySelectorAll(sel);
+      for (const btn of btns) {
+        if (btn) {
+          try { btn.click(); } catch (e) {}
+          try {
+            ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click'].forEach(type => {
+              btn.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+            });
+          } catch (e) {}
+          clicked = true;
+        }
       }
     }
-    return false;
+    return clicked;
   }
 
   // ─── Core Ad Handler ───────────────────────────────────────────────
@@ -128,42 +131,60 @@
     // Add CSS class to hide ad elements instantly
     document.documentElement.classList.add('yt-ad-active');
 
-    // Bind event listeners to track user's volume/rate and skip when ready
-    if (!video.__adEventsBound) {
-      video.__adEventsBound = true;
-      
-      // Save current states as defaults
-      userPlaybackRate = (video.playbackRate === 16) ? 1.0 : video.playbackRate;
-      userMuteState = video.muted;
+    // Check if this is a video ad (interrupting the main video)
+    const isVideoAd = document.querySelector('.ad-showing') !== null || 
+                      document.querySelector('.ad-interrupting') !== null ||
+                      document.querySelector('.ytp-ad-player-overlay') !== null ||
+                      document.querySelector('.ytp-ad-skip-button') !== null ||
+                      document.querySelector('.ytp-ad-skip-button-modern') !== null;
 
-      video.addEventListener('ratechange', () => {
-        if (!isAdActive() && video.playbackRate !== 16) {
-          userPlaybackRate = video.playbackRate;
-        }
-      });
-      video.addEventListener('volumechange', () => {
-        if (!isAdActive()) {
-          userMuteState = video.muted;
-        }
-      });
+    if (isVideoAd) {
+      // Bind event listeners to track user's volume/rate and skip when ready
+      if (!video.__adEventsBound) {
+        video.__adEventsBound = true;
+        
+        // Save current states as defaults
+        userPlaybackRate = (video.playbackRate === 16) ? 1.0 : video.playbackRate;
+        userMuteState = video.muted;
 
-      const skipEvents = ['loadedmetadata', 'durationchange', 'play', 'playing', 'timeupdate'];
-      skipEvents.forEach(evt => {
-        video.addEventListener(evt, () => {
-          if (isAdActive()) {
-            skipVideo(video);
+        video.addEventListener('ratechange', () => {
+          if (!isAdActive() && video.playbackRate !== 16) {
+            userPlaybackRate = video.playbackRate;
           }
         });
-      });
+        video.addEventListener('volumechange', () => {
+          if (!isAdActive()) {
+            userMuteState = video.muted;
+          }
+        });
+
+        const skipEvents = ['loadedmetadata', 'durationchange', 'play', 'playing', 'timeupdate'];
+        skipEvents.forEach(evt => {
+          video.addEventListener(evt, () => {
+            if (isAdActive()) {
+              skipVideo(video);
+            }
+          });
+        });
+      }
+
+      // Mute instantly
+      video.muted = true;
+      // Speed up instantly
+      video.playbackRate = 16;
+      
+      // Perform immediate skip on the video timeline
+      if (video.duration && !isNaN(video.duration)) {
+        if (video.currentTime < video.duration - 0.1) {
+          video.currentTime = video.duration;
+        }
+      } else {
+        video.currentTime = 9999;
+      }
     }
 
-    // Mute instantly
-    video.muted = true;
-    // Speed up instantly
-    video.playbackRate = 16;
-
-    // Perform immediate skip
-    skipVideo(video);
+    // Always attempt to click skip buttons if they exist
+    clickSkipButton();
 
     // adSessionActive prevents restoreAfterAd being called before the ad finishes
     adSessionActive = true;
