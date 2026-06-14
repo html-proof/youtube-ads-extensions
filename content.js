@@ -92,30 +92,29 @@
     if (s2) s2.remove();
   }
 
-  // ─── Skip Buttons ──────────────────────────────────────────────────
-  const SKIP_SELECTORS = [
-    '.ytp-ad-skip-button',
-    '.ytp-ad-skip-button-modern',
-    '.ytp-skip-ad-button',
-    '.ytp-ad-skip-button-slot',
-    'button.ytp-ad-skip-button-modern',
-    'button[aria-label^="Skip ad"]'
-  ];
+  // ─── Visibility Helper ──────────────────────────────────────────────
+  function isVisible(el) {
+    if (!el) return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
 
+  // ─── Skip Buttons ──────────────────────────────────────────────────
   function clickSkipButton() {
     let clicked = false;
-    for (const sel of SKIP_SELECTORS) {
-      const btns = document.querySelectorAll(sel);
-      for (const btn of btns) {
-        if (btn) {
-          try { btn.click(); } catch (e) {}
-          try {
-            ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click'].forEach(type => {
-              btn.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
-            });
-          } catch (e) {}
-          clicked = true;
-        }
+    // Wildcard selectors catch any new class names YouTube invents
+    const skipElements = document.querySelectorAll(
+      '[class*="skip-button"], [id^="skip-button"], [class*="skip-ad"], button[aria-label^="Skip"]'
+    );
+    for (const btn of skipElements) {
+      if (isVisible(btn)) {
+        try { btn.click(); } catch (e) {}
+        try {
+          ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click'].forEach(type => {
+            btn.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+          });
+        } catch (e) {}
+        clicked = true;
       }
     }
     return clicked;
@@ -126,17 +125,14 @@
     const video = getActiveVideo();
     if (!video) return;
 
-    // We caught an ad! Increment counter if off cooldown.
     incrementAdCount();
 
     // Add CSS class to hide ad elements instantly
     document.documentElement.classList.add('yt-ad-active');
 
-    // Bind event listeners to track user's volume/rate and skip when ready
     if (!video.__adEventsBound) {
       video.__adEventsBound = true;
       
-      // Save current states as defaults
       userPlaybackRate = (video.playbackRate === 16) ? 1.0 : video.playbackRate;
       userMuteState = video.muted;
 
@@ -161,31 +157,26 @@
       });
     }
 
-    // Mute instantly
     video.muted = true;
-    // Speed up instantly
     video.playbackRate = 16;
-    
-    // Perform immediate skip on the video timeline
     skipVideo(video);
 
-    // adSessionActive prevents restoreAfterAd being called before the ad finishes
     adSessionActive = true;
   }
 
   function skipVideo(video) {
     if (video.duration && !isNaN(video.duration)) {
-      // Skip to 0.1s before the end. Skipping exactly to the end causes YouTube's player to hang.
       if (video.currentTime < video.duration - 0.5) {
         video.currentTime = video.duration - 0.1;
       }
     }
+    // Always attempt to click skip buttons if they exist
     clickSkipButton();
   }
 
   function restoreAfterAd() {
     document.documentElement.classList.remove('yt-ad-active');
-    adSessionActive = false; // reset so next ad gets counted
+    adSessionActive = false;
     const video = document.querySelector('video');
     if (video) {
       video.playbackRate = userPlaybackRate;
@@ -198,32 +189,30 @@
     const videos = document.querySelectorAll('video');
     if (videos.length === 1) return videos[0];
     
-    // Find the one that is currently playing
     for (let i = 0; i < videos.length; i++) {
       if (videos[i].readyState > 0 && !videos[i].paused && !videos[i].ended) {
         return videos[i];
       }
     }
-    return videos[0]; // fallback
+    return videos[0];
   }
 
   // ─── Check if ad is active ─────────────────────────────────────────
   function isAdActive() {
-    // 1. Check classes (fastest, if YouTube still uses them)
     if (document.querySelector('.ad-showing') !== null || document.querySelector('.ad-interrupting') !== null) {
       return true;
     }
     
-    // 2. Check for visible video ad UI
     const playerOverlay = document.querySelector('.ytp-ad-player-overlay');
-    if (playerOverlay && playerOverlay.offsetParent !== null) {
+    if (playerOverlay && isVisible(playerOverlay)) {
       return true;
     }
 
-    // 3. Check ALL known skip buttons
-    for (const sel of SKIP_SELECTORS) {
-      const btn = document.querySelector(sel);
-      if (btn && btn.offsetParent !== null) {
+    const skipElements = document.querySelectorAll(
+      '[class*="skip-button"], [id^="skip-button"], [class*="skip-ad"], button[aria-label^="Skip"]'
+    );
+    for (const btn of skipElements) {
+      if (isVisible(btn)) {
         return true;
       }
     }
