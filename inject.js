@@ -49,29 +49,22 @@
   // ─── Deep cleaner ────────────────────────────────────────────────
   function cleanObject(obj, depth, visited) {
     if (typeof obj !== 'object' || obj === null) return obj;
-    if (depth > 15) return obj; // safety limit
+    if (depth > 8) return obj; // ad keys live in top levels only
     if (visited.has(obj)) return obj;
     visited.add(obj);
 
     if (Array.isArray(obj)) {
-      // Filter out array items that are ad-only objects
-      for (let i = obj.length - 1; i >= 0; i--) {
-        const item = obj[i];
-        if (typeof item === 'object' && item !== null) {
-          const keys = Object.keys(item);
-          if (keys.length === 1 && AD_KEYS.has(keys[0]) && !SAFE_KEYS.has(keys[0])) {
-            obj.splice(i, 1);
-            continue;
-          }
-          cleanObject(item, depth + 1, visited);
+      for (let i = 0; i < obj.length; i++) {
+        if (typeof obj[i] === 'object' && obj[i] !== null) {
+          cleanObject(obj[i], depth + 1, visited);
         }
       }
       return obj;
     }
 
     let foundAd = false;
-    const keys = Object.keys(obj);
-    for (const key of keys) {
+    for (const key in obj) {
+      if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
       if (AD_KEYS.has(key) && !SAFE_KEYS.has(key)) {
         delete obj[key];
         foundAd = true;

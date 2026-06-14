@@ -209,9 +209,15 @@
 
   // ─── Observer + Interval ──────────────────────────────────────────
   let wasAdActive = false;
+  let lastTickTime = 0;
 
   function tick() {
     if (!extensionEnabled) return;
+
+    // Throttle: max once per 200ms to prevent CPU overload
+    const now = Date.now();
+    if (now - lastTickTime < 200) return;
+    lastTickTime = now;
 
     const adNow = isAdActive();
 
@@ -227,20 +233,17 @@
   function startObserver() {
     if (adObserver) return;
 
-    // Watch for class changes on the player itself (catches ad-showing toggle)
-    adObserver = new MutationObserver(tick);
-
-    // Observe the player container directly for attribute changes
     const player = getPlayer();
     if (player) {
+      // ONLY watch class changes on the player itself — extremely cheap.
+      // This catches the .ad-showing / .ad-interrupting toggle instantly.
+      adObserver = new MutationObserver(tick);
       adObserver.observe(player, { attributes: true, attributeFilter: ['class'] });
     }
 
-    // Also observe the DOM tree for new elements (ad overlays being injected)
-    adObserver.observe(document.documentElement, { childList: true, subtree: true });
-
-    // Backup interval: 100ms is fast enough, cheap enough
-    checkInterval = setInterval(tick, 100);
+    // Backup interval at 300ms. Catches anything the observer misses
+    // without hammering the CPU.
+    checkInterval = setInterval(tick, 300);
   }
 
   function stopObserver() {
