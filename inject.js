@@ -1,283 +1,207 @@
 /**
- * YouTube Ad Shield & Skipper — API Interceptor (v3.1)
- * ===================================================
+ * YouTube Ad Shield — API Interceptor (v4.0)
+ * ==========================================
  * Runs in the MAIN execution world (page context).
- * Intercepts player config, initial variables, Object prototypes,
- * and fetch requests to strip ad configurations completely.
+ * Strips ad data from YouTube's API responses before the player sees them.
+ * Does NOT touch Object.prototype (YouTube detects and works around that).
  */
 
-(function() {
+(function () {
   'use strict';
 
-  const PLAYER_AD_KEYS = [
+  // ─── All known YouTube ad-related JSON keys ──────────────────────
+  const AD_KEYS = new Set([
     'adPlacements',
     'playerAds',
     'adSlots',
-    'adBreakParams'
-  ];
+    'adBreakParams',
+    'adBreakHeartbeatParams',
+    'adLayout',
+    'adLayoutLoggingData',
+    'adInfoRenderer',
+    'adModule',
+    'adVideoId',
+    'instreamAdPlayerOverlayRenderer',
+    'linearAdSequenceRenderer',
+    'playerLegacyDesktopWatchAdsRenderer',
+    'actionCompanionAdRenderer',
+    'adHoverTextButtonRenderer',
+    'adInfoDialogRenderer',
+    'bannerPromoRenderer',
+    'promotedSparklesWebRenderer',
+    'sparklesPlayerResponse',
+    'playerResponse',           // only deleted inside adPlacements context
+    'invideoOverlayAdRenderer',
+  ]);
 
-  // Signal content.js that an ad was intercepted (postMessage bridge)
+  // Keys we must never touch even if they look ad-related
+  const SAFE_KEYS = new Set([
+    'playerResponse',   // top-level playerResponse is critical
+  ]);
+
+  // Signal content.js that an ad was intercepted
   function signalAdBlocked() {
-    window.postMessage({ type: 'YT_AD_SHIELD_BLOCKED' }, '*');
+    try {
+      window.postMessage({ type: 'YT_AD_SHIELD_BLOCKED' }, '*');
+    } catch (e) {}
   }
 
-  // Helper to recursively strip ad-related keys from any object
-  // Returns true if any ad key was found and removed
-  function cleanPlayerResponse(obj, _depth, _visited) {
+  // ─── Deep cleaner ────────────────────────────────────────────────
+  function cleanObject(obj, depth, visited) {
     if (typeof obj !== 'object' || obj === null) return obj;
-    _depth = _depth || 0;
-    _visited = _visited || new WeakSet();
-
-    if (_visited.has(obj)) return obj;
-    _visited.add(obj);
+    if (depth > 15) return obj; // safety limit
+    if (visited.has(obj)) return obj;
+    visited.add(obj);
 
     if (Array.isArray(obj)) {
-      for (let i = 0; i < obj.length; i++) {
-        obj[i] = cleanPlayerResponse(obj[i], _depth + 1, _visited);
+      // Filter out array items that are ad-only objects
+      for (let i = obj.length - 1; i >= 0; i--) {
+        const item = obj[i];
+        if (typeof item === 'object' && item !== null) {
+          const keys = Object.keys(item);
+          if (keys.length === 1 && AD_KEYS.has(keys[0]) && !SAFE_KEYS.has(keys[0])) {
+            obj.splice(i, 1);
+            continue;
+          }
+          cleanObject(item, depth + 1, visited);
+        }
       }
       return obj;
     }
 
     let foundAd = false;
-    for (const key in obj) {
-      if (Object.prototype.hasOwnProperty.call(obj, key)) {
-        if (PLAYER_AD_KEYS.includes(key)) {
-          delete obj[key];
-          foundAd = true;
-        } else {
-          obj[key] = cleanPlayerResponse(obj[key], _depth + 1, _visited);
-        }
+    const keys = Object.keys(obj);
+    for (const key of keys) {
+      if (AD_KEYS.has(key) && !SAFE_KEYS.has(key)) {
+        delete obj[key];
+        foundAd = true;
+      } else if (typeof obj[key] === 'object' && obj[key] !== null) {
+        cleanObject(obj[key], depth + 1, visited);
       }
     }
-    // Only signal from top-level call to avoid duplicate counts
-    if (foundAd && _depth === 0) signalAdBlocked();
+    if (foundAd && depth === 0) signalAdBlocked();
     return obj;
   }
 
-  // Helper to determine if an ad is currently active
-  function isAdActive() {
-    return document.documentElement.classList.contains('yt-ad-active') ||
-           document.querySelector('.ad-showing') !== null ||
-           document.querySelector('.ad-interrupting') !== null ||
-           document.querySelector('.ytp-ad-player-overlay') !== null ||
-           document.querySelector('.ytp-ad-message-container') !== null ||
-           document.querySelector('.ytp-ad-skip-button') !== null ||
-           document.querySelector('.ytp-ad-skip-button-modern') !== null;
+  function clean(obj) {
+    return cleanObject(obj, 0, new WeakSet());
   }
 
-  // ─── Prototype overrides for media playback rate and muting ───
-  try {
-    const descPlaybackRate = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'playbackRate');
-    const descMuted = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'muted');
-
-    if (descPlaybackRate && descMuted) {
-      Object.defineProperty(HTMLMediaElement.prototype, 'playbackRate', {
-        get: function() {
-          if (isAdActive()) return 16;
-          return descPlaybackRate.get.call(this);
-        },
-        set: function(val) {
-          if (isAdActive()) {
-            descPlaybackRate.set.call(this, 16);
-          } else {
-            descPlaybackRate.set.call(this, val);
-          }
-        },
-        configurable: true
-      });
-
-      Object.defineProperty(HTMLMediaElement.prototype, 'muted', {
-        get: function() {
-          if (isAdActive()) return true;
-          return descMuted.get.call(this);
-        },
-        set: function(val) {
-          if (isAdActive()) {
-            descMuted.set.call(this, true);
-          } else {
-            descMuted.set.call(this, val);
-          }
-        },
-        configurable: true
-      });
-    }
-
-    const originalPlay = HTMLMediaElement.prototype.play;
-    HTMLMediaElement.prototype.play = function() {
-      if (isAdActive()) {
-        try {
-          this.muted = true;
-          this.playbackRate = 16;
-        } catch (e) {}
-      }
-      return originalPlay.apply(this, arguments);
-    };
-  } catch (e) {}
-
-  // ─── Intercept Object.prototype as a final fallback ───
-  try {
-    for (const key of PLAYER_AD_KEYS) {
-      if (!(key in Object.prototype)) {
-        Object.defineProperty(Object.prototype, key, {
-          get: function() {
-            return undefined;
-          },
-          set: function(val) {
-            // Ignore assignments to prevent ad loading
-          },
-          configurable: true
-        });
-      }
-    }
-  } catch (e) {}
-
-  // ─── Intercept ytInitialPlayerResponse ───
+  // ─── Intercept ytInitialPlayerResponse ───────────────────────────
   let _ytInitialPlayerResponse;
   try {
     Object.defineProperty(window, 'ytInitialPlayerResponse', {
-      get: function() {
-        return _ytInitialPlayerResponse;
-      },
-      set: function(value) {
-        if (typeof value === 'object' && value !== null) {
-          _ytInitialPlayerResponse = cleanPlayerResponse(value);
-        } else {
-          _ytInitialPlayerResponse = value;
-        }
+      get() { return _ytInitialPlayerResponse; },
+      set(value) {
+        _ytInitialPlayerResponse = (typeof value === 'object' && value !== null)
+          ? clean(value) : value;
       },
       configurable: true
     });
   } catch (e) {}
 
-  // ─── Intercept ytInitialData ───
+  // ─── Intercept ytInitialData ─────────────────────────────────────
   let _ytInitialData;
   try {
     Object.defineProperty(window, 'ytInitialData', {
-      get: function() {
-        return _ytInitialData;
-      },
-      set: function(value) {
-        if (typeof value === 'object' && value !== null) {
-          _ytInitialData = cleanPlayerResponse(value);
-        } else {
-          _ytInitialData = value;
-        }
+      get() { return _ytInitialData; },
+      set(value) {
+        _ytInitialData = (typeof value === 'object' && value !== null)
+          ? clean(value) : value;
       },
       configurable: true
     });
   } catch (e) {}
 
-  // ─── Intercept ytplayer (bootstrapPlayerResponse & config) ───
+  // ─── Intercept ytplayer config ───────────────────────────────────
   let _ytplayer;
   function cleanConfig(config) {
     if (typeof config !== 'object' || config === null) return config;
     if (config.args) {
-      if (config.args.raw_player_response) {
-        try {
-          if (typeof config.args.raw_player_response === 'string') {
-            let parsed = JSON.parse(config.args.raw_player_response);
-            config.args.raw_player_response = JSON.stringify(cleanPlayerResponse(parsed));
-          } else {
-            config.args.raw_player_response = cleanPlayerResponse(config.args.raw_player_response);
-          }
-        } catch (e) {}
-      }
-      if (config.args.player_response) {
-        try {
-          if (typeof config.args.player_response === 'string') {
-            let parsed = JSON.parse(config.args.player_response);
-            config.args.player_response = JSON.stringify(cleanPlayerResponse(parsed));
-          } else {
-            config.args.player_response = cleanPlayerResponse(config.args.player_response);
-          }
-        } catch (e) {}
+      for (const field of ['raw_player_response', 'player_response']) {
+        if (config.args[field]) {
+          try {
+            if (typeof config.args[field] === 'string') {
+              let parsed = JSON.parse(config.args[field]);
+              config.args[field] = JSON.stringify(clean(parsed));
+            } else {
+              config.args[field] = clean(config.args[field]);
+            }
+          } catch (e) {}
+        }
       }
     }
     return config;
   }
 
-  function makeProxy(obj) {
+  function wrapYtplayer(obj) {
     if (typeof obj !== 'object' || obj === null) return obj;
     return new Proxy(obj, {
-      set: function(target, prop, value) {
-        if (prop === 'bootstrapPlayerResponse') {
-          value = cleanPlayerResponse(value);
-        } else if (prop === 'config') {
-          value = cleanConfig(value);
-        }
+      set(target, prop, value) {
+        if (prop === 'bootstrapPlayerResponse') value = clean(value);
+        else if (prop === 'config') value = cleanConfig(value);
         target[prop] = value;
         return true;
       },
-      get: function(target, prop) {
-        return target[prop];
-      }
+      get(target, prop) { return target[prop]; }
     });
   }
 
-  if (window.ytplayer) {
-    _ytplayer = makeProxy(window.ytplayer);
-  }
-  Object.defineProperty(window, 'ytplayer', {
-    get: function() {
-      return _ytplayer;
-    },
-    set: function(value) {
-      _ytplayer = makeProxy(value);
-    },
-    configurable: true
-  });
+  try {
+    if (window.ytplayer) _ytplayer = wrapYtplayer(window.ytplayer);
+    Object.defineProperty(window, 'ytplayer', {
+      get() { return _ytplayer; },
+      set(value) { _ytplayer = wrapYtplayer(value); },
+      configurable: true
+    });
+  } catch (e) {}
 
-  // ─── Intercept fetch — /youtubei/v1/player & /youtubei/v1/next ───
+  // ─── Intercept fetch ─────────────────────────────────────────────
+  const AD_API_PATTERNS = ['/youtubei/v1/player', '/youtubei/v1/next', '/youtubei/v1/ad_break'];
   const originalFetch = window.fetch;
-  window.fetch = function(...args) {
+
+  window.fetch = function (...args) {
     const request = args[0];
-    const requestUrl = typeof request === 'string' ? request : (request instanceof Request ? request.url : '');
+    const url = typeof request === 'string' ? request : (request instanceof Request ? request.url : '');
 
-    if (requestUrl.includes('/youtubei/v1/player') || requestUrl.includes('/youtubei/v1/next')) {
-      return originalFetch.apply(window, args).then(function(response) {
-        if (!response.ok) return response;
+    const isAdApi = AD_API_PATTERNS.some(p => url.includes(p));
+    if (!isAdApi) return originalFetch.apply(this, args);
 
-        return response.text().then(function(text) {
-          let hadAds = false;
-          try {
-            let json = JSON.parse(text);
-            const hasAds = PLAYER_AD_KEYS.some(k => JSON.stringify(json).includes(k)); // Broad check
-            if (hasAds) hadAds = true;
-            json = cleanPlayerResponse(json);
-            text = JSON.stringify(json);
-          } catch (e) {}
+    return originalFetch.apply(window, args).then(response => {
+      if (!response.ok) return response;
+      return response.text().then(text => {
+        try {
+          let json = JSON.parse(text);
+          json = clean(json);
+          text = JSON.stringify(json);
+        } catch (e) {}
 
-          const newResponse = new Response(text, {
-            status: response.status,
-            statusText: response.statusText,
-            headers: response.headers
-          });
-          Object.defineProperty(newResponse, 'url', { value: response.url });
-          return newResponse;
+        return new Response(text, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: response.headers
         });
       });
-    }
-
-    return originalFetch.apply(this, args);
+    });
   };
 
-  // ─── Intercept XMLHttpRequest (Fallback) ───
+  // ─── Intercept XMLHttpRequest ────────────────────────────────────
   try {
-    const originalXHROpen = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function(method, url) {
-      this._url = url;
-      return originalXHROpen.apply(this, arguments);
+    const origOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (method, url) {
+      this.__url = url;
+      return origOpen.apply(this, arguments);
     };
 
-    const descResponseText = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'responseText');
-    if (descResponseText) {
+    const descText = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'responseText');
+    if (descText && descText.get) {
       Object.defineProperty(XMLHttpRequest.prototype, 'responseText', {
-        get: function() {
-          let text = descResponseText.get.call(this);
-          if (this._url && (this._url.includes('/youtubei/v1/player') || this._url.includes('/youtubei/v1/next'))) {
+        get() {
+          let text = descText.get.call(this);
+          if (this.__url && AD_API_PATTERNS.some(p => this.__url.includes(p))) {
             try {
               let json = JSON.parse(text);
-              json = cleanPlayerResponse(json);
+              json = clean(json);
               text = JSON.stringify(json);
             } catch (e) {}
           }
@@ -287,18 +211,18 @@
       });
     }
 
-    const descResponse = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'response');
-    if (descResponse) {
+    const descResp = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'response');
+    if (descResp && descResp.get) {
       Object.defineProperty(XMLHttpRequest.prototype, 'response', {
-        get: function() {
-          let res = descResponse.get.call(this);
-          if (this._url && (this._url.includes('/youtubei/v1/player') || this._url.includes('/youtubei/v1/next'))) {
+        get() {
+          let res = descResp.get.call(this);
+          if (this.__url && AD_API_PATTERNS.some(p => this.__url.includes(p))) {
             try {
               if (typeof res === 'string') {
                 let json = JSON.parse(res);
-                res = JSON.stringify(cleanPlayerResponse(json));
+                res = JSON.stringify(clean(json));
               } else if (typeof res === 'object' && res !== null) {
-                res = cleanPlayerResponse(res);
+                res = clean(res);
               }
             } catch (e) {}
           }
@@ -309,5 +233,50 @@
     }
   } catch (e) {}
 
-  console.log('[YT-AdShield] API interceptor v3.2 initialized (Network Level).');
+  // ─── Playback overrides (only during actual video ads) ───────────
+  function isPlayerShowingAd() {
+    const p = document.querySelector('#movie_player');
+    return p && (p.classList.contains('ad-showing') || p.classList.contains('ad-interrupting'));
+  }
+
+  try {
+    const descRate = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'playbackRate');
+    const descMuted = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'muted');
+
+    if (descRate) {
+      Object.defineProperty(HTMLMediaElement.prototype, 'playbackRate', {
+        get() {
+          if (isPlayerShowingAd()) return 16;
+          return descRate.get.call(this);
+        },
+        set(val) {
+          descRate.set.call(this, isPlayerShowingAd() ? 16 : val);
+        },
+        configurable: true
+      });
+    }
+
+    if (descMuted) {
+      Object.defineProperty(HTMLMediaElement.prototype, 'muted', {
+        get() {
+          if (isPlayerShowingAd()) return true;
+          return descMuted.get.call(this);
+        },
+        set(val) {
+          descMuted.set.call(this, isPlayerShowingAd() ? true : val);
+        },
+        configurable: true
+      });
+    }
+
+    const origPlay = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () {
+      if (isPlayerShowingAd()) {
+        try { this.muted = true; this.playbackRate = 16; } catch (e) {}
+      }
+      return origPlay.apply(this, arguments);
+    };
+  } catch (e) {}
+
+  console.log('[YT-AdShield] API interceptor v4.0 initialized.');
 })();
