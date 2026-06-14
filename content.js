@@ -96,14 +96,28 @@
   function isVisible(el) {
     if (!el) return false;
     const rect = el.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
+    if (rect.width === 0 || rect.height === 0) return false;
+    
+    // Check if element is pushed off-screen (like accessibility buttons)
+    if (rect.right < 0 || rect.bottom < 0) return false;
+    
+    // Check if element is visually hidden by CSS
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none') return false;
+    if (style.visibility === 'hidden') return false;
+    if (style.opacity === '0') return false;
+    
+    return true;
   }
 
   // ─── Skip Buttons ──────────────────────────────────────────────────
   function clickSkipButton() {
     let clicked = false;
-    // Wildcard selectors catch any new class names YouTube invents
-    const skipElements = document.querySelectorAll(
+    const player = document.querySelector('#movie_player');
+    if (!player) return false;
+
+    // Only search INSIDE the video player to avoid global "Skip navigation" buttons
+    const skipElements = player.querySelectorAll(
       '[class*="skip-button"], [id^="skip-button"], [class*="skip-ad"], button[aria-label^="Skip"]'
     );
     for (const btn of skipElements) {
@@ -199,16 +213,22 @@
 
   // ─── Check if ad is active ─────────────────────────────────────────
   function isAdActive() {
-    if (document.querySelector('.ad-showing') !== null || document.querySelector('.ad-interrupting') !== null) {
+    const player = document.querySelector('#movie_player');
+    if (!player) return false;
+
+    // 1. Check classes ON THE PLAYER natively (fastest)
+    if (player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting')) {
       return true;
     }
     
-    const playerOverlay = document.querySelector('.ytp-ad-player-overlay');
+    // 2. Check for visible video ad UI INSIDE the player
+    const playerOverlay = player.querySelector('.ytp-ad-player-overlay');
     if (playerOverlay && isVisible(playerOverlay)) {
       return true;
     }
 
-    const skipElements = document.querySelectorAll(
+    // 3. Check for skip buttons INSIDE the player
+    const skipElements = player.querySelectorAll(
       '[class*="skip-button"], [id^="skip-button"], [class*="skip-ad"], button[aria-label^="Skip"]'
     );
     for (const btn of skipElements) {
